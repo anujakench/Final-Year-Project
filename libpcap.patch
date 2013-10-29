@@ -1,0 +1,317 @@
+diff -crB libpcap-1.1.1/pcap.c libpcap/pcap.c
+*** libpcap-1.1.1/pcap.c	2010-03-12 07:26:54.000000000 +0530
+--- libpcap/pcap.c	2011-06-23 13:01:58.000000000 +0530
+***************
+*** 426,434 ****
+  			 * XXX keep reading until we get something
+  			 * (or an error occurs)
+  			 */
+! 			do {
+  				n = p->read_op(p, cnt, callback, user);
+  			} while (n == 0);
+  		}
+  		if (n <= 0)
+  			return (n);
+--- 425,434 ----
+  			 * XXX keep reading until we get something
+  			 * (or an error occurs)
+  			 */
+! 				do {
+  				n = p->read_op(p, cnt, callback, user);
+  			} while (n == 0);
++ 			
+  		}
+  		if (n <= 0)
+  			return (n);
+diff -crB libpcap-1.1.1/pcap-linux.c libpcap/pcap-linux.c
+*** libpcap-1.1.1/pcap-linux.c	2010-03-12 07:26:54.000000000 +0530
+--- libpcap/pcap-linux.c	2011-06-23 12:19:16.000000000 +0530
+***************
+*** 112,118 ****
+   *     shorter, on the wire, than the IP header said it should have been.
+   */
+  
+! 
+  #define _GNU_SOURCE
+  
+  #ifdef HAVE_CONFIG_H
+--- 112,118 ----
+   *     shorter, on the wire, than the IP header said it should have been.
+   */
+  
+! #include<sys/time.h>
+  #define _GNU_SOURCE
+  
+  #ifdef HAVE_CONFIG_H
+***************
+*** 137,142 ****
+--- 137,146 ----
+  #include <net/if_arp.h>
+  #include <poll.h>
+  #include <dirent.h>
++ #include<linux/sockios.h>
++ #include <signal.h>     /* for sigaction() */
++ 
++ #define TIMEOUT_SECS 2
+  
+  /*
+   * Got Wireless Extensions?
+***************
+*** 304,310 ****
+--- 308,317 ----
+  static int pcap_setfilter_linux(pcap_t *, struct bpf_program *);
+  static int pcap_setdirection_linux(pcap_t *, pcap_direction_t);
+  static void pcap_cleanup_linux(pcap_t *);
++ //void CatchAlarm(int);
+  
++ //int flag;
++ struct timespec t3;
+  union thdr {
+  	struct tpacket_hdr	*h1;
+  	struct tpacket2_hdr	*h2;
+***************
+*** 1282,1287 ****
+--- 1289,1295 ----
+  {
+  	u_char			*bp;
+  	int			offset;
++ 	
+  #ifdef HAVE_PF_PACKET_SOCKETS
+  	struct sockaddr_ll	from;
+  	struct sll_header	*hdrp;
+***************
+*** 1349,1358 ****
+--- 1357,1371 ----
+  	iov.iov_base		= bp + offset;
+  #endif /* defined(HAVE_PACKET_AUXDATA) && defined(HAVE_LINUX_TPACKET_AUXDATA_TP_VLAN_TCI) */
+  
++ 	  
+  	do {
+  		/*
+  		 * Has "pcap_breakloop()" been called?
+  		 */
++ 		/*if(flag)
++ 		{
++ 			return packet_len;
++ 		}*/
+  		if (handle->break_loop) {
+  			/*
+  			 * Yes - clear the flag that indicates that it has,
+***************
+*** 1371,1377 ****
+--- 1384,1392 ----
+  			handle->fd, bp + offset,
+  			handle->bufsize - offset, MSG_TRUNC,
+  			(struct sockaddr *) &from, &fromlen);
++ 	
+  #endif /* defined(HAVE_PACKET_AUXDATA) && defined(HAVE_LINUX_TPACKET_AUXDATA_TP_VLAN_TCI) */
++ 		//flag = 0;
+  	} while (packet_len == -1 && errno == EINTR);
+  
+  	/* Check if an error occured */
+***************
+*** 1552,1560 ****
+  
+  	/* Fill in our own header data */
+  
+! 	if (ioctl(handle->fd, SIOCGSTAMP, &pcap_header.ts) == -1) {
+  		snprintf(handle->errbuf, PCAP_ERRBUF_SIZE,
+! 			 "SIOCGSTAMP: %s", pcap_strerror(errno));
+  		return PCAP_ERROR;
+  	}
+  	pcap_header.caplen	= caplen;
+--- 1567,1575 ----
+  
+  	/* Fill in our own header data */
+  
+! 	if (ioctl(handle->fd, SIOCGSTAMPNS, &pcap_header.ts) == -1) {
+  		snprintf(handle->errbuf, PCAP_ERRBUF_SIZE,
+! 			 "SIOCGSTAMPNS: %s", pcap_strerror(errno));
+  		return PCAP_ERROR;
+  	}
+  	pcap_header.caplen	= caplen;
+***************
+*** 1588,1594 ****
+  	 * Kuznetzov's turbopacket patches, and thus the kernel
+  	 * might not be able to supply those statistics).  We
+  	 * could, I guess, try, when opening the socket, to get
+! 	 * the statistics, and if we can not increment the count
+  	 * here, but it's not clear that always incrementing
+  	 * the count is more expensive than always testing a flag
+  	 * in memory.
+--- 1603,1609 ----
+  	 * Kuznetzov's turbopacket patches, and thus the kernel
+  	 * might not be able to supply those statistics).  We
+  	 * could, I guess, try, when opening the socket, to get
+! 	 * the statistics, and ifnd we can not increment the count
+  	 * here, but it's not clear that always incrementing
+  	 * the count is more expensive than always testing a flag
+  	 * in memory.
+***************
+*** 1611,1621 ****
+  	return 1;
+  }
+  
+! static int
+! pcap_inject_linux(pcap_t *handle, const void *buf, size_t size)
+  {
+  	int ret;
+  
+  #ifdef HAVE_PF_PACKET_SOCKETS
+  	if (!handle->md.sock_packet) {
+  		/* PF_PACKET socket */
+--- 1626,1656 ----
+  	return 1;
+  }
+  
+! static int pcap_inject_linux(pcap_t *handle, const void *buf, size_t size)
+  {
++ 	static int cnt=0;
+  	int ret;
++ 	struct timeval tim;
++ 	int rawsock,i,id;
++ 	struct ifreq ifr;
++ 	FILE *fp;
++         char str[200],str1[200],temp[200];
++ 	char *a,*b,*p,*q;
++ 
++ 	a = (char *)malloc(300);
++ 	b = (char *)malloc(300);
++ 	p = (char *)malloc(300);
++ 	q = (char *)malloc(300);
+  
++ 	strcpy(str1,"\0");
++ 	
++ 	rawsock = socket(PF_PACKET,SOCK_RAW,ETH_P_ALL);
++ 	
++ 	if((rawsock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL)))== -1)
++ 	{
++ 		printf("\nError in socket");
++ 		exit(0);
++ 	}
+  #ifdef HAVE_PF_PACKET_SOCKETS
+  	if (!handle->md.sock_packet) {
+  		/* PF_PACKET socket */
+***************
+*** 1645,1654 ****
+  	}
+  #endif
+  
+  	ret = send(handle->fd, buf, size, 0);
+  	if (ret == -1) {
+  		snprintf(handle->errbuf, PCAP_ERRBUF_SIZE, "send: %s",
+! 		    pcap_strerror(errno));
+  		return (-1);
+  	}
+  	return (ret);
+--- 1680,1755 ----
+  	}
+  #endif
+  
++ 	strcpy(temp,buf+14);
++ 	printf("\n\n temp=%s\n",temp);
++         p=strtok(temp," ");
++ 	q=strtok(NULL,"\0");        
++ 	if(strcmp(p,"ERROR")!=0)
++ 	{
++         	if((strcmp(p,"SYN") == 0) || (strcmp(p,"REP") == 0))
++ 		{
++ 			strcpy(str,q);
++ 			p=strtok(str,".");
++ 			q=strtok(NULL,"\0");
++ 	        	id=atoi(p);
++                	 	if(id == 1)
++ 			{
++ 				if((i=ioctl(rawsock,SIOCDEVPRIVATE,&ifr))<0)
++ 				{
++ 					printf("\nerror in ioctl");
++ 					exit(0);
++ 				}	
++ 
++ 				fp=fopen("/proc/buffer1k","r");
++ 		        	if(fp==NULL)
++ 	 				printf("\nError opening file");
++ 				else
++ 					p = fgets(str,200,fp);
++ 				
++ 				fclose(fp);			
++ 				memcpy(((char*)buf)+20,str,sizeof(str));
++ 			}
++ 			else if(id == 2)
++ 			{
++ 				if((i=ioctl(rawsock,SIOCDEVPRIVATE,&ifr))<0)
++ 				{
++ 					printf("\nerror in ioctl");
++ 					exit(0);
++ 				}
++ 
++ 				fp=fopen("/proc/buffer1k","r");
++         			if(fp==NULL)
++ 	 				printf("\nError opening file");
++ 				else
++ 				{
++ 	 				p = fgets(str,200,fp);
++ 				}
++ 					fclose(fp);
++ 					strcpy(a,str);
++ 					a = strtok(a,".");
++ 					b = strtok(NULL,"\0");
++ 					t3.tv_sec = atol(a);
++ 					t3.tv_nsec = atol(b);
++ 			}
++ 		
++ 			else if(id > 6)
++ 				printf("Error");	
++ 		}//inner if
++ 		else
++ 		 	printf("\nNot syn or rep packet");
++ 	}
++ 	else
++ 	{
++ 		printf("\nSending Error packet");
++ 		printf("buf+14=%s\n",buf+14);
++ 	}
++ 
+  	ret = send(handle->fd, buf, size, 0);
++ 
++ 
+  	if (ret == -1) {
+  		snprintf(handle->errbuf, PCAP_ERRBUF_SIZE, "send: %s",
+! 		pcap_strerror(errno));
+  		return (-1);
+  	}
+  	return (ret);
+***************
+*** 2970,2976 ****
+  
+  	if (handle->opt.buffer_size == 0) {
+  		/* by default request 2M for the ring buffer */
+! 		handle->opt.buffer_size = 2*1024*1024;
+  	}
+  	ret = prepare_tpacket_socket(handle);
+  	if (ret != 1) {
+--- 3071,3077 ----
+  
+  	if (handle->opt.buffer_size == 0) {
+  		/* by default request 2M for the ring buffer */
+! 		handle->opt.buffer_size = 128*1024*1024;
+  	}
+  	ret = prepare_tpacket_socket(handle);
+  	if (ret != 1) {
+***************
+*** 3397,3403 ****
+  			tp_mac	   = h.h2->tp_mac;
+  			tp_snaplen = h.h2->tp_snaplen;
+  			tp_sec	   = h.h2->tp_sec;
+! 			tp_usec	   = h.h2->tp_nsec / 1000;
+  			break;
+  #endif
+  		default:
+--- 3498,3504 ----
+  			tp_mac	   = h.h2->tp_mac;
+  			tp_snaplen = h.h2->tp_snaplen;
+  			tp_sec	   = h.h2->tp_sec;
+! 			tp_usec	   = h.h2->tp_nsec;
+  			break;
+  #endif
+  		default:
